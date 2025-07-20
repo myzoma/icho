@@ -321,7 +321,6 @@ class IchimokuScanner {
         const highVolume = volume > volumeThreshold;
         
         const obvRising = obv[obv.length - 1] > obv[obv.length - 2];
-        const macdBullish = macd.bullishCrossover || (macd.macd > macd.signal &&
         const macdBullish = macd.bullishCrossover || (macd.macd > macd.signal && macd.histogram > 0);
         
         let status = '';
