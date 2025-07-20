@@ -6,8 +6,8 @@ class IchimokuScanner {
         this.currentTimeframe = '1d';
         this.timeframeSettings = {
             '1d': { limit: 52, name: 'يومي' },
-            '4h': { limit: 208, name: '4 ساعات' }, // 52 * 4 = 208 للحصول على نفس الفترة
-            '1h': { limit: 832, name: 'ساعة' }     // 52 * 16 = 832 للحصول على نفس الفترة
+            '4h': { limit: 208, name: '4 ساعات' },
+            '1h': { limit: 832, name: 'ساعة' }
         };
         this.init();
     }
@@ -60,12 +60,12 @@ class IchimokuScanner {
         this.updateCount(0);
         document.getElementById('cardsContainer').innerHTML = '<div class="loading">جاري فحص العملات...</div>';
 
-        const batchSize = this.currentTimeframe === '1h' ? 5 : 10; // تقليل الدفعة للفريم الساعة
+        const batchSize = this.currentTimeframe === '1h' ? 5 : 10;
         for (let i = 0; i < this.symbols.length; i += batchSize) {
             const batch = this.symbols.slice(i, i + batchSize);
             await this.processBatch(batch);
             this.updateStatus(`تم فحص ${Math.min(i + batchSize, this.symbols.length)} من ${this.symbols.length} - ${this.timeframeSettings[this.currentTimeframe].name}`);
-            await this.sleep(this.currentTimeframe === '1h' ? 200 : 100); // تأخير أكبر للفريم الساعة
+            await this.sleep(this.currentTimeframe === '1h' ? 200 : 100);
         }
 
         this.filteredCoins.sort((a, b) => b.volume - a.volume);
@@ -143,18 +143,17 @@ class IchimokuScanner {
     }
 
     getRequiredCandles() {
-        // حساب عدد الشموع المطلوبة حسب الفريم الزمني
         switch (this.currentTimeframe) {
             case '1d': return 52;
-            case '4h': return 208; // 52 يوم * 6 شموع في اليوم
-            case '1h': return 832;  // 52 يوم * 24 ساعة - محدود بـ 1000 من Binance
+            case '4h': return 208;
+            case '1h': return 832;
             default: return 52;
         }
     }
 
     async getKlines(symbol) {
         try {
-            const limit = Math.min(this.timeframeSettings[this.currentTimeframe].limit, 1000); // Binance limit
+            const limit = Math.min(this.timeframeSettings[this.currentTimeframe].limit, 1000);
             const response = await fetch(`https://api.api1.binancecom/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
             return await response.json();
         } catch (error) {
@@ -177,7 +176,6 @@ class IchimokuScanner {
         const requiredCandles = this.getRequiredCandles();
         if (highs.length < requiredCandles) return null;
 
-        // تعديل فترات Ichimoku حسب الفريم الزمني
         const periods = this.getIchimokuPeriods();
         
         const tenkanSen = this.calculateLine(highs, lows, periods.tenkan);
@@ -197,14 +195,13 @@ class IchimokuScanner {
     }
 
     getIchimokuPeriods() {
-        // تعديل فترات Ichimoku حسب الفريم الزمني
         switch (this.currentTimeframe) {
             case '1d':
                 return { tenkan: 9, kijun: 26, senkou: 52 };
             case '4h':
-                return { tenkan: 36, kijun: 104, senkou: 208 }; // 9*4, 26*4, 52*4
+                return { tenkan: 36, kijun: 104, senkou: 208 };
             case '1h':
-                return { tenkan: 72, kijun: 208, senkou: 416 }; // تقليل للحد من استهلاك البيانات
+                return { tenkan: 72, kijun: 208, senkou: 416 };
             default:
                 return { tenkan: 9, kijun: 26, senkou: 52 };
         }
@@ -244,14 +241,13 @@ class IchimokuScanner {
     }
 
     getMACDPeriods() {
-        // تعديل فترات MACD حسب الفريم الزمني
         switch (this.currentTimeframe) {
             case '1d':
                 return { fast: 12, slow: 26, signal: 9 };
             case '4h':
-                return { fast: 48, slow: 104, signal: 36 }; // 12*4, 26*4, 9*4
+                return { fast: 48, slow: 104, signal: 36 };
             case '1h':
-                return { fast: 72, slow: 156, signal: 54 }; // تقليل للحد من استهلاك البيانات
+                return { fast: 72, slow: 156, signal: 54 };
             default:
                 return { fast: 12, slow: 26, signal: 9 };
         }
@@ -287,7 +283,6 @@ class IchimokuScanner {
     }
 
     analyzeConditions(price, ichimoku, macd, obv, volume) {
-        // تعديل حد الحجم حسب الفريم الزمني
         const volumeThreshold = this.getVolumeThreshold();
         const highVolume = volume > volumeThreshold;
         
@@ -322,7 +317,6 @@ class IchimokuScanner {
     }
 
     getVolumeThreshold() {
-        // تعديل حد الحجم حسب الفريم الزمني
         switch (this.currentTimeframe) {
             case '1d': return 1000000;
             case '4h': return 500000;
