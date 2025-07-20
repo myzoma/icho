@@ -5,9 +5,9 @@ class IchimokuScanner {
         this.stableCoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'USDD'];
         this.currentTimeframe = '1d';
         this.timeframeSettings = {
-            '1d': { limit: 78, name: 'يومي' }, // زيادة للحصول على بيانات كافية للإزاحة
-            '4h': { limit: 312, name: '4 ساعات' },
-            '1h': { limit: 1000, name: 'ساعة' }
+            '1d': { limit: 78, name: 'يومي' },
+            '4h': { limit: 156, name: '4 ساعات' }, // تقليل العدد
+            '1h': { limit: 312, name: 'ساعة' } // تقليل العدد
         };
         this.init();
     }
@@ -149,8 +149,8 @@ class IchimokuScanner {
     getRequiredCandles() {
         switch (this.currentTimeframe) {
             case '1d': return 78; // 52 + 26 للإزاحة
-            case '4h': return 312; // 208 + 104 للإزاحة
-            case '1h': return 1000; // الحد الأقصى
+            case '4h': return 156; // 104 + 52 للإزاحة  
+            case '1h': return 312; // 208 + 104 للإزاحة
             default: return 78;
         }
     }
@@ -176,39 +176,33 @@ class IchimokuScanner {
         }
     }
 
-    // الحساب الصحيح لإيشيموكو مع الإزاحة
+    // الحساب الصحيح لإيشيموكو مع فترات دقيقة لكل فريم
     calculateIchimokuCorrect(highs, lows, closes) {
         const requiredCandles = this.getRequiredCandles();
         if (highs.length < requiredCandles) return null;
 
         const periods = this.getIchimokuPeriods();
-        const displacement = periods.displacement; // 26 أو ما يعادلها
+        const displacement = periods.displacement;
         
         // حساب الخطوط الحالية
         const currentTenkan = this.calculateLine(highs, lows, periods.tenkan);
         const currentKijun = this.calculateLine(highs, lows, periods.kijun);
         
         // حساب السحابة الحالية (التي تؤثر على السعر الآن)
-        // السحابة الحالية محسوبة من 26 فترة مضت
+        // السحابة الحالية محسوبة من displacement فترة مضت
         const pastIndex = Math.max(0, highs.length - displacement);
         
         let pastTenkan, pastKijun, pastSenkouB;
         
-        if (pastIndex > 0) {
+        if (pastIndex >= periods.senkou) {
             const pastHighs = highs.slice(0, pastIndex);
             const pastLows = lows.slice(0, pastIndex);
             
-            if (pastHighs.length >= periods.tenkan) {
-                pastTenkan = this.calculateLine(pastHighs, pastLows, periods.tenkan);
-                pastKijun = this.calculateLine(pastHighs, pastLows, periods.kijun);
-                pastSenkouB = this.calculateLine(pastHighs, pastLows, periods.senkou);
-            } else {
-                // إذا لم تكن هناك بيانات كافية، استخدم القيم الحالية
-                pastTenkan = currentTenkan;
-                pastKijun = currentKijun;
-                pastSenkouB = this.calculateLine(highs, lows, periods.senkou);
-            }
+            pastTenkan = this.calculateLine(pastHighs, pastLows, periods.tenkan);
+            pastKijun = this.calculateLine(pastHighs, pastLows, periods.kijun);
+            pastSenkouB = this.calculateLine(pastHighs, pastLows, periods.senkou);
         } else {
+            // إذا لم تكن هناك بيانات كافية، استخدم القيم الحالية
             pastTenkan = currentTenkan;
             pastKijun = currentKijun;
             pastSenkouB = this.calculateLine(highs, lows, periods.senkou);
@@ -227,14 +221,32 @@ class IchimokuScanner {
         };
     }
 
+    // فترات إيشيموكو المصححة لكل فريم
     getIchimokuPeriods() {
         switch (this.currentTimeframe) {
             case '1d':
-                return { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 };
+                return { 
+                    tenkan: 9, 
+                    kijun: 26, 
+                    senkou: 52, 
+                    displacement: 26 
+                };
             case '4h':
-                return { tenkan: 36, kijun: 104, senkou: 208, displacement: 104 };
+                // للفريم 4 ساعات: نضرب في 6 (24÷4=6)
+                return { 
+                    tenkan: 9,      // نفس القيمة
+                    kijun: 26,      // نفس القيمة  
+                    senkou: 52,     // نفس القيمة
+                    displacement: 26 // نفس القيمة
+                };
             case '1h':
-                return { tenkan: 72, kijun: 208, senkou: 416, displacement: 208 };
+                // للفريم ساعة: نضرب في 24
+                return { 
+                    tenkan: 9,      // نفس القيمة
+                    kijun: 26,      // نفس القيمة
+                    senkou: 52,     // نفس القيمة  
+                    displacement: 26 // نفس القيمة
+                };
             default:
                 return { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 };
         }
@@ -274,14 +286,15 @@ class IchimokuScanner {
         };
     }
 
+    // فترات MACD المصححة
     getMACDPeriods() {
         switch (this.currentTimeframe) {
             case '1d':
                 return { fast: 12, slow: 26, signal: 9 };
             case '4h':
-                return { fast: 48, slow: 104, signal: 36 };
+                return { fast: 12, slow: 26, signal: 9 }; // نفس القيم
             case '1h':
-                return { fast: 72, slow: 156, signal: 54 };
+                return { fast: 12, slow: 26, signal: 9 }; // نفس القيم
             default:
                 return { fast: 12, slow: 26, signal: 9 };
         }
@@ -316,7 +329,7 @@ class IchimokuScanner {
         return obv;
     }
 
-    analyzeConditions(price, ichimoku, macd, obv, volume) {
+      analyzeConditions(price, ichimoku, macd, obv, volume) {
         const volumeThreshold = this.getVolumeThreshold();
         const highVolume = volume > volumeThreshold;
         
@@ -335,14 +348,16 @@ class IchimokuScanner {
         // حساب إمكانية الاختراق (0-100)
         breakoutPotential = this.calculateBreakoutPotential(price, ichimoku, macd, obv, volume);
         
-        // **شروط أكثر دقة للكشف المبكر**
+        // شروط مختلفة حسب الفريم الزمني
+        const thresholds = this.getTimeframeThresholds();
+        
         if (price > ichimoku.cloudTop) {
             // فوق السحابة - نتحقق من قوة الاختراق
-            if (distanceToCloud <= 1) {
+            if (distanceToCloud <= thresholds.freshBreakout) {
                 status = 'fresh-breakout';
                 statusText = '🚀 اختراق حديث جداً';
                 meetsCriteria = macdBullish && obvRising && highVolume;
-            } else if (distanceToCloud <= 3) {
+            } else if (distanceToCloud <= thresholds.recentBreakout) {
                 status = 'recent-breakout';
                 statusText = '✅ اختراق حديث';
                 meetsCriteria = macdBullish && obvRising && highVolume;
@@ -365,17 +380,17 @@ class IchimokuScanner {
             }
         } else {
             // تحت السحابة
-            if (distanceToCloud >= -2) {
+            if (distanceToCloud >= thresholds.imminent) {
                 status = 'imminent';
                 statusText = '🎯 اختراق وشيك';
                 meetsCriteria = macdBullish && obvRising && highVolume && 
                               price > ichimoku.tenkanSen && breakoutPotential > 80;
-            } else if (distanceToCloud >= -5) {
+            } else if (distanceToCloud >= thresholds.approaching) {
                 status = 'approaching';
                 statusText = '📈 يقترب من السحابة';
                 meetsCriteria = macdBullish && obvRising && highVolume && 
                               price > ichimoku.tenkanSen && breakoutPotential > 70;
-            } else if (distanceToCloud >= -10) {
+            } else if (distanceToCloud >= thresholds.building) {
                 status = 'building';
                 statusText = '🔨 يبني قوة';
                 meetsCriteria = macdBullish && obvRising && highVolume && breakoutPotential > 85;
@@ -393,25 +408,62 @@ class IchimokuScanner {
         };
     }
 
+    // عتبات مختلفة لكل فريم زمني
+    getTimeframeThresholds() {
+        switch (this.currentTimeframe) {
+            case '1d':
+                return {
+                    freshBreakout: 1,    // 1% للاختراق الحديث جداً
+                    recentBreakout: 3,   // 3% للاختراق الحديث
+                    imminent: -2,        // -2% للاختراق الوشيك
+                    approaching: -5,     // -5% للاقتراب
+                    building: -10        // -10% لبناء القوة
+                };
+            case '4h':
+                return {
+                    freshBreakout: 0.5,  // أقل للفريمات الأقصر
+                    recentBreakout: 2,   
+                    imminent: -1,        
+                    approaching: -3,     
+                    building: -7         
+                };
+            case '1h':
+                return {
+                    freshBreakout: 0.3,  // أقل بكثير للفريم الساعة
+                    recentBreakout: 1,   
+                    imminent: -0.5,      
+                    approaching: -2,     
+                    building: -5         
+                };
+            default:
+                return {
+                    freshBreakout: 1,
+                    recentBreakout: 3,
+                    imminent: -2,
+                    approaching: -5,
+                    building: -10
+                };
+        }
+    }
+
     calculateBreakoutPotential(price, ichimoku, macd, obv, volume) {
         let potential = 0;
         
         // 1. موقع السعر بالنسبة للسحابة (35 نقطة)
         const distanceToCloud = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
+        const thresholds = this.getTimeframeThresholds();
         
-        if (distanceToCloud >= -0.5 && distanceToCloud <= 1) {
+        if (distanceToCloud >= thresholds.imminent && distanceToCloud <= thresholds.freshBreakout) {
             potential += 35; // في المنطقة المثالية
-        } else if (distanceToCloud >= -2 && distanceToCloud < -0.5) {
+        } else if (distanceToCloud >= thresholds.approaching && distanceToCloud < thresholds.imminent) {
             potential += 30; // قريب جداً
-        } else if (distanceToCloud >= -5 && distanceToCloud < -2) {
+        } else if (distanceToCloud >= thresholds.building && distanceToCloud < thresholds.approaching) {
             potential += 25; // قريب
-        } else if (distanceToCloud >= -10 && distanceToCloud < -5) {
-            potential += 20; // متوسط المسافة
-        } else if (distanceToCloud < -10) {
-            potential += 10; // بعيد
-        } else if (distanceToCloud > 1 && distanceToCloud <= 3) {
+        } else if (distanceToCloud < thresholds.building) {
+            potential += 15; // بعيد نسبياً
+        } else if (distanceToCloud > thresholds.freshBreakout && distanceToCloud <= thresholds.recentBreakout) {
             potential += 25; // اختراق حديث
-        } else if (distanceToCloud > 3) {
+        } else if (distanceToCloud > thresholds.recentBreakout) {
             potential += 5; // اختراق قديم
         }
         
@@ -480,11 +532,12 @@ class IchimokuScanner {
         return 'down';
     }
 
+    // عتبات الحجم المختلفة لكل فريم
     getVolumeThreshold() {
         switch (this.currentTimeframe) {
-            case '1d': return 1000000;
-            case '4h': return 500000;
-            case '1h': return 200000;
+            case '1d': return 1000000;   // حجم يومي
+            case '4h': return 800000;    // حجم 4 ساعات (أقل من اليومي)
+            case '1h': return 500000;    // حجم ساعة (أقل بكثير)
             default: return 1000000;
         }
     }
@@ -535,10 +588,12 @@ class IchimokuScanner {
         };
 
         const getDistanceColor = (distance) => {
-            if (distance > 3) return 'old-breakout'; // اختراق قديم
+            const thresholds = this.getTimeframeThresholds();
+            
+            if (distance > thresholds.recentBreakout) return 'old-breakout'; // اختراق قديم
             if (distance > 0) return 'positive'; // فوق السحابة
-            if (distance >= -2) return 'warning'; // قريب جداً
-            if (distance >= -5) return 'approaching'; // يقترب
+            if (distance >= thresholds.imminent) return 'warning'; // قريب جداً
+            if (distance >= thresholds.approaching) return 'approaching'; // يقترب
             return 'negative'; // بعيد
         };
 
@@ -568,7 +623,7 @@ class IchimokuScanner {
                 <div class="distance-info">
                     <div class="distance-label">المسافة إلى سقف السحابة:</div>
                     <div class="distance-value ${getDistanceColor(coin.distanceToCloud)}">
-                        ${coin.distanceToCloud > 0 ? '+' : ''}${coin.distanceToCloud.toFixed(2)}%
+                        ${coin.distanceToCloud > 0 ? '+' : ''}${coin.distanceToCloud.toFixed(3)}%
                     </div>
                 </div>
                 
@@ -618,8 +673,33 @@ class IchimokuScanner {
                         </div>
                     </div>
                 </div>
+                
+                <div class="timeframe-specific-info">
+                    <div class="info-item">
+                        <span class="info-label">دقة الفريم:</span>
+                        <span class="info-value ${this.getFrameAccuracyClass()}">${this.getFrameAccuracyText()}</span>
+                    </div>
+                </div>
             </div>
         `;
+    }
+
+    getFrameAccuracyClass() {
+        switch (this.currentTimeframe) {
+            case '1d': return 'high-accuracy';
+            case '4h': return 'medium-accuracy';
+            case '1h': return 'low-accuracy';
+            default: return 'medium-accuracy';
+        }
+    }
+
+    getFrameAccuracyText() {
+        switch (this.currentTimeframe) {
+            case '1d': return '🎯 دقة عالية';
+            case '4h': return '⚡ دقة متوسطة';
+            case '1h': return '⚠️ دقة منخفضة - للمتابعة السريعة';
+            default: return 'متوسط';
+        }
     }
 
     sleep(ms) {
