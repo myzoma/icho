@@ -3,6 +3,12 @@ class IchimokuScanner {
         this.symbols = [];
         this.filteredCoins = [];
         this.stableCoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'USDD'];
+        this.currentTimeframe = '1d';
+        this.timeframeSettings = {
+            '1d': { limit: 52, name: 'يومي' },
+            '4h': { limit: 208, name: '4 ساعات' }, // 52 * 4 = 208 للحصول على نفس الفترة
+            '1h': { limit: 832, name: 'ساعة' }     // 52 * 16 = 832 للحصول على نفس الفترة
+        };
         this.init();
     }
 
@@ -14,6 +20,10 @@ class IchimokuScanner {
 
     bindEvents() {
         document.getElementById('scanBtn').addEventListener('click', () => this.scanCoins());
+        document.getElementById('timeframeSelect').addEventListener('change', (e) => {
+            this.currentTimeframe = e.target.value;
+            this.updateStatus(`تم تغيير الفريم إلى ${this.timeframeSettings[this.currentTimeframe].name}`);
+        });
     }
 
     updateStatus(message) {
@@ -26,14 +36,14 @@ class IchimokuScanner {
 
     async loadSymbols() {
         try {
-            const response = await fetch('https://api1.binance.com/api/v3/exchangeInfo');
+            const response = await fetch('https://api.api1.binancecom/api/v3/exchangeInfo');
             const data = await response.json();
             
             this.symbols = data.symbols
                 .filter(s => s.status === 'TRADING' && s.quoteAsset === 'USDT')
                 .filter(s => !this.stableCoins.includes(s.baseAsset))
                 .map(s => s.symbol)
-                .slice(0, 400);
+                .slice(0, 100);
                 
         } catch (error) {
             console.error('خطأ في تحميل الرموز:', error);
@@ -50,12 +60,12 @@ class IchimokuScanner {
         this.updateCount(0);
         document.getElementById('cardsContainer').innerHTML = '<div class="loading">جاري فحص العملات...</div>';
 
-        const batchSize = 10;
+        const batchSize = this.currentTimeframe === '1h' ? 5 : 10; // تقليل الدفعة للفريم الساعة
         for (let i = 0; i < this.symbols.length; i += batchSize) {
             const batch = this.symbols.slice(i, i + batchSize);
             await this.processBatch(batch);
-            this.updateStatus(`تم فحص ${Math.min(i + batchSize, this.symbols.length)} من ${this.symbols.length}`);
-            await this.sleep(100);
+            this.updateStatus(`تم فحص ${Math.min(i + batchSize, this.symbols.length)} من ${this.symbols.length} - ${this.timeframeSettings[this.currentTimeframe].name}`);
+            await this.sleep(this.currentTimeframe === '1h' ? 200 : 100); // تأخير أكبر للفريم الساعة
         }
 
         this.filteredCoins.sort((a, b) => b.volume - a.volume);
@@ -65,7 +75,7 @@ class IchimokuScanner {
         
         scanBtn.disabled = false;
         scanBtn.textContent = '🔄 فحص العملات';
-        this.updateStatus(`تم العثور على ${this.filteredCoins.length} عملة`);
+        this.updateStatus(`تم العثور على ${this.filteredCoins.length} عملة - ${this.timeframeSettings[this.currentTimeframe].name}`);
     }
 
     async processBatch(symbols) {
@@ -87,7 +97,8 @@ class IchimokuScanner {
                 this.getTicker(symbol)
             ]);
 
-            if (!klines || klines.length < 52) return null;
+            const requiredCandles = this.getRequiredCandles();
+            if (!klines || klines.length < requiredCandles) return null;
 
             const closes = klines.map(k => parseFloat(k[4]));
             const highs = klines.map(k => parseFloat(k[2]));
@@ -113,6 +124,8 @@ class IchimokuScanner {
                     symbol: symbol.replace('USDT', ''),
                     price: currentPrice,
                     volume: volume24h,
+                    timeframe: this.currentTimeframe,
+                    timeframeName: this.timeframeSettings[this.currentTimeframe].name,
                     ichimoku,
                     macd,
                     obv: obv[obv.length - 1],
@@ -129,9 +142,20 @@ class IchimokuScanner {
         }
     }
 
+    getRequiredCandles() {
+        // حساب عدد الشموع المطلوبة حسب الفريم الزمني
+        switch (this.currentTimeframe) {
+            case '1d': return 52;
+            case '4h': return 208; // 52 يوم * 6 شموع في اليوم
+            case '1h': return 832;  // 52 يوم * 24 ساعة - محدود بـ 1000 من Binance
+            default: return 52;
+        }
+    }
+
     async getKlines(symbol) {
         try {
-            const response = await fetch(`https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=52`);
+            const limit = Math.min(this.timeframeSettings[this.currentTimeframe].limit, 1000); // Binance limit
+            const response = await fetch(`https://api.api1.binancecom/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
             return await response.json();
         } catch (error) {
             console.error(`خطأ في جلب بيانات ${symbol}:`, error);
@@ -141,7 +165,7 @@ class IchimokuScanner {
 
     async getTicker(symbol) {
         try {
-            const response = await fetch(`https://api1.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+            const response = await fetch(`https://api.api1.binancecom/api/v3/ticker/24hr?symbol=${symbol}`);
             return await response.json();
         } catch (error) {
             console.error(`خطأ في جلب ticker ${symbol}:`, error);
@@ -150,13 +174,17 @@ class IchimokuScanner {
     }
 
     calculateIchimoku(highs, lows, closes) {
-        if (highs.length < 52) return null;
+        const requiredCandles = this.getRequiredCandles();
+        if (highs.length < requiredCandles) return null;
 
-        const tenkanSen = this.calculateLine(highs, lows, 9);
-        const kijunSen = this.calculateLine(highs, lows, 26);
+        // تعديل فترات Ichimoku حسب الفريم الزمني
+        const periods = this.getIchimokuPeriods();
+        
+        const tenkanSen = this.calculateLine(highs, lows, periods.tenkan);
+        const kijunSen = this.calculateLine(highs, lows, periods.kijun);
         
         const senkouSpanA = (tenkanSen + kijunSen) / 2;
-        const senkouSpanB = this.calculateLine(highs, lows, 52);
+        const senkouSpanB = this.calculateLine(highs, lows, periods.senkou);
         
         return {
             tenkanSen,
@@ -168,6 +196,20 @@ class IchimokuScanner {
         };
     }
 
+    getIchimokuPeriods() {
+        // تعديل فترات Ichimoku حسب الفريم الزمني
+        switch (this.currentTimeframe) {
+            case '1d':
+                return { tenkan: 9, kijun: 26, senkou: 52 };
+            case '4h':
+                return { tenkan: 36, kijun: 104, senkou: 208 }; // 9*4, 26*4, 52*4
+            case '1h':
+                return { tenkan: 72, kijun: 208, senkou: 416 }; // تقليل للحد من استهلاك البيانات
+            default:
+                return { tenkan: 9, kijun: 26, senkou: 52 };
+        }
+    }
+
     calculateLine(highs, lows, period) {
         const recentHighs = highs.slice(-period);
         const recentLows = lows.slice(-period);
@@ -177,27 +219,42 @@ class IchimokuScanner {
     }
 
     calculateMACD(closes) {
-        if (closes.length < 26) return null;
+        const periods = this.getMACDPeriods();
+        if (closes.length < periods.slow) return null;
         
-        const ema12 = this.calculateEMA(closes, 12);
-        const ema26 = this.calculateEMA(closes, 26);
-        const macdLine = ema12 - ema26;
+        const emaFast = this.calculateEMA(closes, periods.fast);
+        const emaSlow = this.calculateEMA(closes, periods.slow);
+        const macdLine = emaFast - emaSlow;
         
         const macdHistory = [];
-        for (let i = 25; i < closes.length; i++) {
-            const ema12_i = this.calculateEMA(closes.slice(0, i + 1), 12);
-            const ema26_i = this.calculateEMA(closes.slice(0, i + 1), 26);
-            macdHistory.push(ema12_i - ema26_i);
+        for (let i = periods.slow - 1; i < closes.length; i++) {
+            const emaFast_i = this.calculateEMA(closes.slice(0, i + 1), periods.fast);
+            const emaSlow_i = this.calculateEMA(closes.slice(0, i + 1), periods.slow);
+            macdHistory.push(emaFast_i - emaSlow_i);
         }
         
-        const signalLine = this.calculateEMA(macdHistory, 9);
+        const signalLine = this.calculateEMA(macdHistory, periods.signal);
         
         return {
             macd: macdLine,
             signal: signalLine,
             histogram: macdLine - signalLine,
-            bullishCrossover: macdLine > signalLine && macdHistory[macdHistory.length - 2] <= this.calculateEMA(macdHistory.slice(0, -1), 9)
+            bullishCrossover: macdLine > signalLine && macdHistory[macdHistory.length - 2] <= this.calculateEMA(macdHistory.slice(0, -1), periods.signal)
         };
+    }
+
+    getMACDPeriods() {
+        // تعديل فترات MACD حسب الفريم الزمني
+        switch (this.currentTimeframe) {
+            case '1d':
+                return { fast: 12, slow: 26, signal: 9 };
+            case '4h':
+                return { fast: 48, slow: 104, signal: 36 }; // 12*4, 26*4, 9*4
+            case '1h':
+                return { fast: 72, slow: 156, signal: 54 }; // تقليل للحد من استهلاك البيانات
+            default:
+                return { fast: 12, slow: 26, signal: 9 };
+        }
     }
 
     calculateEMA(data, period) {
@@ -230,7 +287,9 @@ class IchimokuScanner {
     }
 
     analyzeConditions(price, ichimoku, macd, obv, volume) {
-        const highVolume = volume > 1000000;
+        // تعديل حد الحجم حسب الفريم الزمني
+        const volumeThreshold = this.getVolumeThreshold();
+        const highVolume = volume > volumeThreshold;
         
         const obvRising = obv[obv.length - 1] > obv[obv.length - 2];
         const macdBullish = macd.bullishCrossover;
@@ -262,6 +321,16 @@ class IchimokuScanner {
         };
     }
 
+    getVolumeThreshold() {
+        // تعديل حد الحجم حسب الفريم الزمني
+        switch (this.currentTimeframe) {
+            case '1d': return 1000000;
+            case '4h': return 500000;
+            case '1h': return 200000;
+            default: return 1000000;
+        }
+    }
+
     displayResults() {
         const container = document.getElementById('cardsContainer');
         
@@ -287,6 +356,7 @@ class IchimokuScanner {
 
         return `
             <div class="crypto-card">
+                <div class="timeframe-badge">${coin.timeframeName}</div>
                 <div class="card-header">
                     <div class="symbol">${coin.symbol}/USDT</div>
                     <div class="price">$${formatNumber(coin.price, 4)}</div>
