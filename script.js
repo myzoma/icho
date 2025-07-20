@@ -36,14 +36,14 @@ class IchimokuScanner {
 
     async loadSymbols() {
         try {
-            const response = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+            const response = await fetch('https://api1.binance.com/api/v3/exchangeInfo');
             const data = await response.json();
             
             this.symbols = data.symbols
                 .filter(s => s.status === 'TRADING' && s.quoteAsset === 'USDT')
                 .filter(s => !this.stableCoins.includes(s.baseAsset))
                 .map(s => s.symbol)
-                .slice(0, 400);
+                .slice(0, 100);
                 
         } catch (error) {
             console.error('خطأ في تحميل الرموز:', error);
@@ -130,7 +130,9 @@ class IchimokuScanner {
                     macd,
                     obv: obv[obv.length - 1],
                     status: analysis.status,
-                    statusText: analysis.statusText
+                    statusText: analysis.statusText,
+                    distanceToCloud: analysis.distanceToCloud,
+                    breakoutPotential: analysis.breakoutPotential
                 };
             }
 
@@ -154,7 +156,7 @@ class IchimokuScanner {
     async getKlines(symbol) {
         try {
             const limit = Math.min(this.timeframeSettings[this.currentTimeframe].limit, 1000);
-            const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
+            const response = await fetch(`https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
             return await response.json();
         } catch (error) {
             console.error(`خطأ في جلب بيانات ${symbol}:`, error);
@@ -287,33 +289,120 @@ class IchimokuScanner {
         const highVolume = volume > volumeThreshold;
         
         const obvRising = obv[obv.length - 1] > obv[obv.length - 2];
-        const macdBullish = macd.bullishCrossover;
+        const macdBullish = macd.bullishCrossover || (macd.macd > macd.signal && macd.histogram > 0);
         
         let status = '';
         let statusText = '';
         let meetsCriteria = false;
+        let distanceToCloud = 0;
+        let breakoutPotential = 0;
         
-        const priceToCloudTop = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
+        // حساب المسافة إلى سقف السحابة
+        distanceToCloud = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
         
-        if (price > ichimoku.cloudTop) {
-            status = 'breakout';
-            statusText = 'تحقق الاختراق';
+        // حساب إمكانية الاختراق (0-100)
+        breakoutPotential = this.calculateBreakoutPotential(price, ichimoku, macd, obv, volume);
+        
+        // **التعديل الجديد: التركيز على العملات قبل الاختراق**
+        if (price > ichimoku.cloudTop && distanceToCloud <= 2) {
+            // اختراق حديث (أقل من 2%)
+            status = 'fresh-breakout';
+            statusText = '🚀 اختراق حديث';
             meetsCriteria = macdBullish && obvRising && highVolume;
         } else if (price >= ichimoku.cloudBottom && price <= ichimoku.cloudTop) {
+            // داخل السحابة ومهيأ للاختراق
             status = 'ready';
-            statusText = 'السعر مهيأ للاختراق';
+            statusText = '⚡ مهيأ للاختراق';
             meetsCriteria = macdBullish && obvRising && highVolume && price > ichimoku.kijunSen;
-        } else if (priceToCloudTop >= -5) {
-            status = 'approaching';
-            statusText = 'السعر يقترب من سقف السحابة';
+        } else if (distanceToCloud >= -3 && distanceToCloud < 0) {
+            // قريب جداً من سقف السحابة (أقل من 3%)
+            status = 'imminent';
+            statusText = '🎯 اختراق وشيك';
             meetsCriteria = macdBullish && obvRising && highVolume && price > ichimoku.tenkanSen;
+        } else if (distanceToCloud >= -8 && distanceToCloud < -3) {
+            // يقترب من السحابة
+            status = 'approaching';
+            statusText = '📈 يقترب من السحابة';
+            meetsCriteria = macdBullish && obvRising && highVolume && breakoutPotential > 70;
         }
         
         return {
             meetsCriteria,
             status,
-            statusText
+            statusText,
+            distanceToCloud,
+            breakoutPotential
         };
+    }
+
+    calculateBreakoutPotential(price, ichimoku, macd, obv, volume) {
+        let potential = 0;
+        
+        // 1. موقع السعر (30 نقطة)
+        const distanceToCloud = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
+        if (distanceToCloud >= -1 && distanceToCloud <= 2) {
+            potential += 30; // قريب جداً من الاختراق أو اختراق حديث
+        } else if (distanceToCloud >= -3 && distanceToCloud < -1) {
+            potential += 25; // قريب من الاختراق
+        } else if (distanceToCloud >= -5 && distanceToCloud < -3) {
+            potential += 20; // يقترب
+        } else if (distanceToCloud >= -8 && distanceToCloud < -5) {
+            potential += 15; // بعيد نسبياً
+        }
+        
+        // 2. قوة MACD (25 نقطة)
+        if (macd.bullishCrossover) {
+            potential += 25; // تقاطع صاعد حديث
+        } else if (macd.macd > macd.signal && macd.histogram > 0) {
+            potential += 20; // إشارة إيجابية
+        } else if (macd.histogram > 0) {
+            potential += 15; // تحسن في الزخم
+        }
+        
+        // 3. اتجاه OBV (20 نقطة)
+        const obvTrend = this.getOBVTrend(obv);
+        if (obvTrend === 'strong-up') {
+            potential += 20;
+        } else if (obvTrend === 'up') {
+            potential += 15;
+        } else if (obvTrend === 'neutral') {
+            potential += 10;
+        }
+        
+        // 4. الحجم (15 نقطة)
+        const volumeThreshold = this.getVolumeThreshold();
+        if (volume > volumeThreshold * 2) {
+            potential += 15; // حجم عالي جداً
+        } else if (volume > volumeThreshold) {
+            potential += 12; // حجم عالي
+        } else if (volume > volumeThreshold * 0.7) {
+            potential += 8; // حجم متوسط
+        }
+        
+        // 5. موقع السعر بالنسبة لخطوط إيشيموكو (10 نقاط)
+        if (price > ichimoku.tenkanSen && price > ichimoku.kijunSen) {
+            potential += 10;
+        } else if (price > ichimoku.tenkanSen || price > ichimoku.kijunSen) {
+            potential += 7;
+        }
+        
+        return Math.min(potential, 100); // الحد الأقصى 100
+    }
+
+    getOBVTrend(obvArray) {
+        if (obvArray.length < 5) return 'neutral';
+        
+        const recent = obvArray.slice(-5);
+        let upCount = 0;
+        
+        for (let i = 1; i < recent.length; i++) {
+            if (recent[i] > recent[i - 1]) upCount++;
+        }
+        
+        if (upCount >= 4) return 'strong-up';
+        if (upCount >= 3) return 'up';
+        if (upCount >= 2) return 'neutral';
+        return 'down';
     }
 
     getVolumeThreshold() {
@@ -333,6 +422,9 @@ class IchimokuScanner {
             return;
         }
 
+        // ترتيب حسب إمكانية الاختراق
+        this.filteredCoins.sort((a, b) => b.breakoutPotential - a.breakoutPotential);
+        
         container.innerHTML = this.filteredCoins.map(coin => this.createCoinCard(coin)).join('');
     }
 
@@ -348,9 +440,26 @@ class IchimokuScanner {
             return volume.toFixed(0);
         };
 
+        const getDistanceColor = (distance) => {
+            if (distance > 0) return 'positive'; // فوق السحابة
+            if (distance >= -3) return 'warning'; // قريب جداً
+            return 'negative'; // تحت السحابة
+        };
+
+        const getPotentialColor = (potential) => {
+            if (potential >= 80) return 'excellent';
+            if (potential >= 60) return 'good';
+            if (potential >= 40) return 'fair';
+            return 'poor';
+        };
+
         return `
             <div class="crypto-card">
                 <div class="timeframe-badge">${coin.timeframeName}</div>
+                <div class="potential-badge ${getPotentialColor(coin.breakoutPotential)}">
+                    ${coin.breakoutPotential.toFixed(0)}%
+                </div>
+                
                 <div class="card-header">
                     <div class="symbol">${coin.symbol}/USDT</div>
                     <div class="price">$${formatNumber(coin.price, 4)}</div>
@@ -358,6 +467,13 @@ class IchimokuScanner {
                 
                 <div class="status-badge ${coin.status}">
                     ${coin.statusText}
+                </div>
+                
+                <div class="distance-info">
+                    <div class="distance-label">المسافة إلى سقف السحابة:</div>
+                    <div class="distance-value ${getDistanceColor(coin.distanceToCloud)}">
+                        ${coin.distanceToCloud > 0 ? '+' : ''}${coin.distanceToCloud.toFixed(2)}%
+                    </div>
                 </div>
                 
                 <div class="cloud-info">
