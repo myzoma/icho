@@ -5,9 +5,9 @@ class IchimokuScanner {
         this.stableCoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'USDD'];
         this.currentTimeframe = '1d';
         this.timeframeSettings = {
-            '1d': { limit: 52, name: 'يومي' },
-            '4h': { limit: 208, name: '4 ساعات' },
-            '1h': { limit: 832, name: 'ساعة' }
+            '1d': { limit: 78, name: 'يومي' }, // زيادة للحصول على بيانات كافية للإزاحة
+            '4h': { limit: 312, name: '4 ساعات' },
+            '1h': { limit: 1000, name: 'ساعة' }
         };
         this.init();
     }
@@ -60,15 +60,15 @@ class IchimokuScanner {
         this.updateCount(0);
         document.getElementById('cardsContainer').innerHTML = '<div class="loading">جاري فحص العملات...</div>';
 
-        const batchSize = this.currentTimeframe === '1h' ? 5 : 10;
+        const batchSize = this.currentTimeframe === '1h' ? 3 : 8;
         for (let i = 0; i < this.symbols.length; i += batchSize) {
             const batch = this.symbols.slice(i, i + batchSize);
             await this.processBatch(batch);
             this.updateStatus(`تم فحص ${Math.min(i + batchSize, this.symbols.length)} من ${this.symbols.length} - ${this.timeframeSettings[this.currentTimeframe].name}`);
-            await this.sleep(this.currentTimeframe === '1h' ? 200 : 100);
+            await this.sleep(this.currentTimeframe === '1h' ? 300 : 150);
         }
 
-        this.filteredCoins.sort((a, b) => b.volume - a.volume);
+        this.filteredCoins.sort((a, b) => b.breakoutPotential - a.breakoutPotential);
         this.filteredCoins = this.filteredCoins.slice(0, 30);
         
         this.displayResults();
@@ -108,7 +108,7 @@ class IchimokuScanner {
             const currentPrice = parseFloat(ticker.lastPrice);
             const volume24h = parseFloat(ticker.volume);
 
-            const ichimoku = this.calculateIchimoku(highs, lows, closes);
+            const ichimoku = this.calculateIchimokuCorrect(highs, lows, closes);
             if (!ichimoku) return null;
 
             const macd = this.calculateMACD(closes);
@@ -132,7 +132,9 @@ class IchimokuScanner {
                     status: analysis.status,
                     statusText: analysis.statusText,
                     distanceToCloud: analysis.distanceToCloud,
-                    breakoutPotential: analysis.breakoutPotential
+                    breakoutPotential: analysis.breakoutPotential,
+                    actualCloudTop: analysis.actualCloudTop,
+                    actualCloudBottom: analysis.actualCloudBottom
                 };
             }
 
@@ -146,10 +148,10 @@ class IchimokuScanner {
 
     getRequiredCandles() {
         switch (this.currentTimeframe) {
-            case '1d': return 52;
-            case '4h': return 208;
-            case '1h': return 832;
-            default: return 52;
+            case '1d': return 78; // 52 + 26 للإزاحة
+            case '4h': return 312; // 208 + 104 للإزاحة
+            case '1h': return 1000; // الحد الأقصى
+            default: return 78;
         }
     }
 
@@ -174,42 +176,72 @@ class IchimokuScanner {
         }
     }
 
-    calculateIchimoku(highs, lows, closes) {
+    // الحساب الصحيح لإيشيموكو مع الإزاحة
+    calculateIchimokuCorrect(highs, lows, closes) {
         const requiredCandles = this.getRequiredCandles();
         if (highs.length < requiredCandles) return null;
 
         const periods = this.getIchimokuPeriods();
+        const displacement = periods.displacement; // 26 أو ما يعادلها
         
-        const tenkanSen = this.calculateLine(highs, lows, periods.tenkan);
-        const kijunSen = this.calculateLine(highs, lows, periods.kijun);
+        // حساب الخطوط الحالية
+        const currentTenkan = this.calculateLine(highs, lows, periods.tenkan);
+        const currentKijun = this.calculateLine(highs, lows, periods.kijun);
         
-        const senkouSpanA = (tenkanSen + kijunSen) / 2;
-        const senkouSpanB = this.calculateLine(highs, lows, periods.senkou);
+        // حساب السحابة الحالية (التي تؤثر على السعر الآن)
+        // السحابة الحالية محسوبة من 26 فترة مضت
+        const pastIndex = Math.max(0, highs.length - displacement);
+        
+        let pastTenkan, pastKijun, pastSenkouB;
+        
+        if (pastIndex > 0) {
+            const pastHighs = highs.slice(0, pastIndex);
+            const pastLows = lows.slice(0, pastIndex);
+            
+            if (pastHighs.length >= periods.tenkan) {
+                pastTenkan = this.calculateLine(pastHighs, pastLows, periods.tenkan);
+                pastKijun = this.calculateLine(pastHighs, pastLows, periods.kijun);
+                pastSenkouB = this.calculateLine(pastHighs, pastLows, periods.senkou);
+            } else {
+                // إذا لم تكن هناك بيانات كافية، استخدم القيم الحالية
+                pastTenkan = currentTenkan;
+                pastKijun = currentKijun;
+                pastSenkouB = this.calculateLine(highs, lows, periods.senkou);
+            }
+        } else {
+            pastTenkan = currentTenkan;
+            pastKijun = currentKijun;
+            pastSenkouB = this.calculateLine(highs, lows, periods.senkou);
+        }
+        
+        const actualSenkouA = (pastTenkan + pastKijun) / 2;
+        const actualSenkouB = pastSenkouB;
         
         return {
-            tenkanSen,
-            kijunSen,
-            senkouSpanA,
-            senkouSpanB,
-            cloudTop: Math.max(senkouSpanA, senkouSpanB),
-            cloudBottom: Math.min(senkouSpanA, senkouSpanB)
+            tenkanSen: currentTenkan,
+            kijunSen: currentKijun,
+            senkouSpanA: actualSenkouA,
+            senkouSpanB: actualSenkouB,
+            cloudTop: Math.max(actualSenkouA, actualSenkouB),
+            cloudBottom: Math.min(actualSenkouA, actualSenkouB)
         };
     }
 
     getIchimokuPeriods() {
         switch (this.currentTimeframe) {
             case '1d':
-                return { tenkan: 9, kijun: 26, senkou: 52 };
+                return { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 };
             case '4h':
-                return { tenkan: 36, kijun: 104, senkou: 208 };
+                return { tenkan: 36, kijun: 104, senkou: 208, displacement: 104 };
             case '1h':
-                return { tenkan: 72, kijun: 208, senkou: 416 };
+                return { tenkan: 72, kijun: 208, senkou: 416, displacement: 208 };
             default:
-                return { tenkan: 9, kijun: 26, senkou: 52 };
+                return { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 };
         }
     }
 
     calculateLine(highs, lows, period) {
+        if (highs.length < period) return null;
         const recentHighs = highs.slice(-period);
         const recentLows = lows.slice(-period);
         const highest = Math.max(...recentHighs);
@@ -289,6 +321,7 @@ class IchimokuScanner {
         const highVolume = volume > volumeThreshold;
         
         const obvRising = obv[obv.length - 1] > obv[obv.length - 2];
+        const macdBullish = macd.bullishCrossover || (macd.macd > macd.signal &&
         const macdBullish = macd.bullishCrossover || (macd.macd > macd.signal && macd.histogram > 0);
         
         let status = '';
@@ -297,33 +330,57 @@ class IchimokuScanner {
         let distanceToCloud = 0;
         let breakoutPotential = 0;
         
-        // حساب المسافة إلى سقف السحابة
+        // حساب المسافة إلى سقف السحابة الفعلي
         distanceToCloud = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
         
         // حساب إمكانية الاختراق (0-100)
         breakoutPotential = this.calculateBreakoutPotential(price, ichimoku, macd, obv, volume);
         
-        // **التعديل الجديد: التركيز على العملات قبل الاختراق**
-        if (price > ichimoku.cloudTop && distanceToCloud <= 2) {
-            // اختراق حديث (أقل من 2%)
-            status = 'fresh-breakout';
-            statusText = '🚀 اختراق حديث';
-            meetsCriteria = macdBullish && obvRising && highVolume;
+        // **شروط أكثر دقة للكشف المبكر**
+        if (price > ichimoku.cloudTop) {
+            // فوق السحابة - نتحقق من قوة الاختراق
+            if (distanceToCloud <= 1) {
+                status = 'fresh-breakout';
+                statusText = '🚀 اختراق حديث جداً';
+                meetsCriteria = macdBullish && obvRising && highVolume;
+            } else if (distanceToCloud <= 3) {
+                status = 'recent-breakout';
+                statusText = '✅ اختراق حديث';
+                meetsCriteria = macdBullish && obvRising && highVolume;
+            } else {
+                // اختراق قديم - لا نعرضه
+                meetsCriteria = false;
+            }
         } else if (price >= ichimoku.cloudBottom && price <= ichimoku.cloudTop) {
-            // داخل السحابة ومهيأ للاختراق
-            status = 'ready';
-            statusText = '⚡ مهيأ للاختراق';
-            meetsCriteria = macdBullish && obvRising && highVolume && price > ichimoku.kijunSen;
-        } else if (distanceToCloud >= -3 && distanceToCloud < 0) {
-            // قريب جداً من سقف السحابة (أقل من 3%)
-            status = 'imminent';
-            statusText = '🎯 اختراق وشيك';
-            meetsCriteria = macdBullish && obvRising && highVolume && price > ichimoku.tenkanSen;
-        } else if (distanceToCloud >= -8 && distanceToCloud < -3) {
-            // يقترب من السحابة
-            status = 'approaching';
-            statusText = '📈 يقترب من السحابة';
-            meetsCriteria = macdBullish && obvRising && highVolume && breakoutPotential > 70;
+            // داخل السحابة
+            const cloudPosition = ((price - ichimoku.cloudBottom) / (ichimoku.cloudTop - ichimoku.cloudBottom)) * 100;
+            
+            if (cloudPosition >= 70) {
+                status = 'ready';
+                statusText = '⚡ مهيأ للاختراق';
+                meetsCriteria = macdBullish && obvRising && highVolume && price > ichimoku.kijunSen;
+            } else if (cloudPosition >= 40) {
+                status = 'in-cloud';
+                statusText = '🌤️ داخل السحابة';
+                meetsCriteria = macdBullish && obvRising && highVolume && breakoutPotential > 75;
+            }
+        } else {
+            // تحت السحابة
+            if (distanceToCloud >= -2) {
+                status = 'imminent';
+                statusText = '🎯 اختراق وشيك';
+                meetsCriteria = macdBullish && obvRising && highVolume && 
+                              price > ichimoku.tenkanSen && breakoutPotential > 80;
+            } else if (distanceToCloud >= -5) {
+                status = 'approaching';
+                statusText = '📈 يقترب من السحابة';
+                meetsCriteria = macdBullish && obvRising && highVolume && 
+                              price > ichimoku.tenkanSen && breakoutPotential > 70;
+            } else if (distanceToCloud >= -10) {
+                status = 'building';
+                statusText = '🔨 يبني قوة';
+                meetsCriteria = macdBullish && obvRising && highVolume && breakoutPotential > 85;
+            }
         }
         
         return {
@@ -331,32 +388,43 @@ class IchimokuScanner {
             status,
             statusText,
             distanceToCloud,
-            breakoutPotential
+            breakoutPotential,
+            actualCloudTop: ichimoku.cloudTop,
+            actualCloudBottom: ichimoku.cloudBottom
         };
     }
 
     calculateBreakoutPotential(price, ichimoku, macd, obv, volume) {
         let potential = 0;
         
-        // 1. موقع السعر (30 نقطة)
+        // 1. موقع السعر بالنسبة للسحابة (35 نقطة)
         const distanceToCloud = ((price - ichimoku.cloudTop) / ichimoku.cloudTop) * 100;
-        if (distanceToCloud >= -1 && distanceToCloud <= 2) {
-            potential += 30; // قريب جداً من الاختراق أو اختراق حديث
-        } else if (distanceToCloud >= -3 && distanceToCloud < -1) {
-            potential += 25; // قريب من الاختراق
-        } else if (distanceToCloud >= -5 && distanceToCloud < -3) {
-            potential += 20; // يقترب
-        } else if (distanceToCloud >= -8 && distanceToCloud < -5) {
-            potential += 15; // بعيد نسبياً
+        
+        if (distanceToCloud >= -0.5 && distanceToCloud <= 1) {
+            potential += 35; // في المنطقة المثالية
+        } else if (distanceToCloud >= -2 && distanceToCloud < -0.5) {
+            potential += 30; // قريب جداً
+        } else if (distanceToCloud >= -5 && distanceToCloud < -2) {
+            potential += 25; // قريب
+        } else if (distanceToCloud >= -10 && distanceToCloud < -5) {
+            potential += 20; // متوسط المسافة
+        } else if (distanceToCloud < -10) {
+            potential += 10; // بعيد
+        } else if (distanceToCloud > 1 && distanceToCloud <= 3) {
+            potential += 25; // اختراق حديث
+        } else if (distanceToCloud > 3) {
+            potential += 5; // اختراق قديم
         }
         
         // 2. قوة MACD (25 نقطة)
         if (macd.bullishCrossover) {
             potential += 25; // تقاطع صاعد حديث
         } else if (macd.macd > macd.signal && macd.histogram > 0) {
-            potential += 20; // إشارة إيجابية
+            potential += 20; // إشارة إيجابية قوية
         } else if (macd.histogram > 0) {
             potential += 15; // تحسن في الزخم
+        } else if (macd.macd > macd.signal) {
+            potential += 10; // إشارة إيجابية ضعيفة
         }
         
         // 3. اتجاه OBV (20 نقطة)
@@ -366,27 +434,31 @@ class IchimokuScanner {
         } else if (obvTrend === 'up') {
             potential += 15;
         } else if (obvTrend === 'neutral') {
-            potential += 10;
+            potential += 8;
+        } else {
+            potential += 0;
         }
         
-        // 4. الحجم (15 نقطة)
+        // 4. الحجم (10 نقاط)
         const volumeThreshold = this.getVolumeThreshold();
-        if (volume > volumeThreshold * 2) {
-            potential += 15; // حجم عالي جداً
+        if (volume > volumeThreshold * 3) {
+            potential += 10; // حجم استثنائي
+        } else if (volume > volumeThreshold * 2) {
+            potential += 8; // حجم عالي جداً
         } else if (volume > volumeThreshold) {
-            potential += 12; // حجم عالي
+            potential += 6; // حجم عالي
         } else if (volume > volumeThreshold * 0.7) {
-            potential += 8; // حجم متوسط
+            potential += 4; // حجم متوسط
         }
         
         // 5. موقع السعر بالنسبة لخطوط إيشيموكو (10 نقاط)
-        if (price > ichimoku.tenkanSen && price > ichimoku.kijunSen) {
-            potential += 10;
-        } else if (price > ichimoku.tenkanSen || price > ichimoku.kijunSen) {
-            potential += 7;
-        }
+        let ichimokuScore = 0;
+        if (price > ichimoku.tenkanSen) ichimokuScore += 3;
+        if (price > ichimoku.kijunSen) ichimokuScore += 4;
+        if (ichimoku.tenkanSen > ichimoku.kijunSen) ichimokuScore += 3;
+        potential += ichimokuScore;
         
-        return Math.min(potential, 100); // الحد الأقصى 100
+        return Math.min(potential, 100);
     }
 
     getOBVTrend(obvArray) {
@@ -394,12 +466,16 @@ class IchimokuScanner {
         
         const recent = obvArray.slice(-5);
         let upCount = 0;
+        let strongUp = 0;
         
         for (let i = 1; i < recent.length; i++) {
-            if (recent[i] > recent[i - 1]) upCount++;
+            if (recent[i] > recent[i - 1]) {
+                upCount++;
+                if (recent[i] > recent[i - 1] * 1.02) strongUp++; // زيادة أكثر من 2%
+            }
         }
         
-        if (upCount >= 4) return 'strong-up';
+        if (upCount >= 4 && strongUp >= 2) return 'strong-up';
         if (upCount >= 3) return 'up';
         if (upCount >= 2) return 'neutral';
         return 'down';
@@ -422,8 +498,27 @@ class IchimokuScanner {
             return;
         }
 
-        // ترتيب حسب إمكانية الاختراق
-        this.filteredCoins.sort((a, b) => b.breakoutPotential - a.breakoutPotential);
+        // ترتيب حسب إمكانية الاختراق والحالة
+        this.filteredCoins.sort((a, b) => {
+            // أولوية للعملات الوشيكة الاختراق
+            const priorityOrder = {
+                'imminent': 5,
+                'ready': 4,
+                'fresh-breakout': 3,
+                'recent-breakout': 2,
+                'approaching': 1,
+                'building': 0
+            };
+            
+            const aPriority = priorityOrder[a.status] || 0;
+            const bPriority = priorityOrder[b.status] || 0;
+            
+            if (aPriority !== bPriority) {
+                return bPriority - aPriority;
+            }
+            
+            return b.breakoutPotential - a.breakoutPotential;
+        });
         
         container.innerHTML = this.filteredCoins.map(coin => this.createCoinCard(coin)).join('');
     }
@@ -441,15 +536,17 @@ class IchimokuScanner {
         };
 
         const getDistanceColor = (distance) => {
+            if (distance > 3) return 'old-breakout'; // اختراق قديم
             if (distance > 0) return 'positive'; // فوق السحابة
-            if (distance >= -3) return 'warning'; // قريب جداً
-            return 'negative'; // تحت السحابة
+            if (distance >= -2) return 'warning'; // قريب جداً
+            if (distance >= -5) return 'approaching'; // يقترب
+            return 'negative'; // بعيد
         };
 
         const getPotentialColor = (potential) => {
-            if (potential >= 80) return 'excellent';
-            if (potential >= 60) return 'good';
-            if (potential >= 40) return 'fair';
+            if (potential >= 85) return 'excellent';
+            if (potential >= 70) return 'good';
+            if (potential >= 50) return 'fair';
             return 'poor';
         };
 
@@ -477,15 +574,15 @@ class IchimokuScanner {
                 </div>
                 
                 <div class="cloud-info">
-                    <h4>🌤️ حدود السحابة</h4>
+                    <h4>🌤️ السحابة الفعلية (مع الإزاحة)</h4>
                     <div class="cloud-bounds">
                         <div class="bound">
-                            <div class="bound-label">سقف السحابة</div>
-                            <div class="bound-value">$${formatNumber(coin.ichimoku.cloudTop, 4)}</div>
+                            <div class="bound-label">سقف السحابة الفعلي</div>
+                            <div class="bound-value">$${formatNumber(coin.actualCloudTop, 4)}</div>
                         </div>
                         <div class="bound">
-                            <div class="bound-label">قاع السحابة</div>
-                            <div class="bound-value">$${formatNumber(coin.ichimoku.cloudBottom, 4)}</div>
+                            <div class="bound-label">قاع السحابة الفعلي</div>
+                            <div class="bound-value">$${formatNumber(coin.actualCloudBottom, 4)}</div>
                         </div>
                     </div>
                     <div class="cloud-bounds">
