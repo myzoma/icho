@@ -43,7 +43,7 @@ class IchimokuScanner {
                 .filter(s => s.status === 'TRADING' && s.quoteAsset === 'USDT')
                 .filter(s => !this.stableCoins.includes(s.baseAsset))
                 .map(s => s.symbol)
-                .slice(0, 100);
+                .slice(0, 400);
                 
         } catch (error) {
             console.error('خطأ في تحميل الرموز:', error);
