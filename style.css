@@ -283,3 +283,80 @@ header h1 {
         font-size: 2rem;
     }
 }
+/* إضافة الأنماط الجديدة في نهاية الملف */
+
+.potential-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    padding: 8px 12px;
+    border-radius: 15px;
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: white;
+}
+
+.potential-badge.excellent {
+    background: linear-gradient(45deg, #10b981, #059669);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.potential-badge.good {
+    background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+}
+
+.potential-badge.fair {
+    background: linear-gradient(45deg, #f59e0b, #d97706);
+}
+
+.potential-badge.poor {
+    background: linear-gradient(45deg, #ef4444, #dc2626);
+}
+
+.distance-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+}
+
+.distance-label {
+    font-size: 0.9rem;
+    color: #94a3b8;
+}
+
+.distance-value {
+    font-weight: bold;
+    font-size: 1.1rem;
+}
+
+.distance-value.positive {
+    color: #4ade80;
+}
+
+.distance-value.warning {
+    color: #fbbf24;
+}
+
+.distance-value.negative {
+    color: #f87171;
+}
+
+.status-badge.fresh-breakout {
+    background: linear-gradient(45deg, #10b981, #059669);
+    animation: pulse 2s infinite;
+}
+
+.status-badge.imminent {
+    background: linear-gradient(45deg, #fbbf24, #f59e0b);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
