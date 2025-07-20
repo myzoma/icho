@@ -36,7 +36,7 @@ class IchimokuScanner {
 
     async loadSymbols() {
         try {
-            const response = await fetch('https://api.api1.binancecom/api/v3/exchangeInfo');
+            const response = await fetch('https://api.binance.com/api/v3/exchangeInfo');
             const data = await response.json();
             
             this.symbols = data.symbols
@@ -154,7 +154,7 @@ class IchimokuScanner {
     async getKlines(symbol) {
         try {
             const limit = Math.min(this.timeframeSettings[this.currentTimeframe].limit, 1000);
-            const response = await fetch(`https://api.api1.binancecom/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
+            const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${this.currentTimeframe}&limit=${limit}`);
             return await response.json();
         } catch (error) {
             console.error(`خطأ في جلب بيانات ${symbol}:`, error);
@@ -164,7 +164,7 @@ class IchimokuScanner {
 
     async getTicker(symbol) {
         try {
-            const response = await fetch(`https://api.api1.binancecom/api/v3/ticker/24hr?symbol=${symbol}`);
+            const response = await fetch(`https://api1.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
             return await response.json();
         } catch (error) {
             console.error(`خطأ في جلب ticker ${symbol}:`, error);
